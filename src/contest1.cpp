@@ -29,6 +29,12 @@ uint8_t bumper[3] = {kobuki_msgs::BumperEvent::RELEASED, kobuki_msgs::BumperEven
 float minLaserDist = std::numeric_limits<float>::infinity();
 int32_t nLasers=0, desiredNLasers=0, desiredAngle=5;
 
+//variable triggered if front bumper pressed to start sequence of events
+int32_t F_bumper_idx =0;
+//variable triggered if one of side bumpers is pressed to start sequence of events
+int32_t L_bumper_idx =0;
+int32_t R_bumper_idx =0;
+
 void bumperCallback(const kobuki_msgs::BumperEvent::ConstPtr& msg)
 {
 	//Access using bumper[kobuki_msgs::BumperEvent::{}] LEFT,CENTER, or RIGHT
@@ -88,26 +94,82 @@ int main(int argc, char **argv)
     while(ros::ok() && secondsElapsed <= 900) {
         ros::spinOnce();
         //
-        // Check if any of the bumpers were pressed.
 
         ROS_INFO("Position: (%f,%f) Orientation: %f degrees Range", posX, posY,RAD2DEG(yaw),minLaserDist);
 
         bool any_bumper_pressed=false;
+
+        angular = 0.0;
+        linear = 0.2;
+
+        //check to see if any of the bumpers are being pressed
         for(uint32_t b_idx = 0; b_idx < N_BUMPER; ++b_idx) {
             any_bumper_pressed|=(bumper[b_idx] ==kobuki_msgs::BumperEvent::PRESSED);
         }
         //
         // Control logic after bumpers are being pressed.
-        if (posX < 0.5 && yaw < M_PI /12 && !any_bumper_pressed) {
+
+        //if the front bumper is pressed reverse and turn following sequence of events
+    
+        if (F_bumper_idx >= 1 && F_bumper_idx < 5){
             angular =0.0;
-            linear =0.2;
+            linear =-0.2;
+            F_bumper_idx += 1;
+
         }
-        else if (yaw < M_PI /2 && posX > 0.5 && !any_bumper_pressed) {
-            angular =M_PI /6;
-            linear =0.0;
+        else if (F_bumper_idx >= 1 && F_bumper_idx < 40){
+            angular = M_PI /6;
+            linear = 0.0;
+            F_bumper_idx += 1;
+
         }
+        else if (F_bumper_idx >= 1){
+            F_bumper_idx = 0;
+
+        }
+        // If side bumpers are pressed turn away from the wall
+
+        if (R_bumper_idx >= 1 && R_bumper_idx < 12){
+            angular = M_PI/6;
+            linear = 0.0;
+            R_bumper_idx += 1;
+
+        }
+        else if (R_bumper_idx >= 1){
+            R_bumper_idx = 0;
+
+        }
+
+        if (L_bumper_idx >= 1 && L_bumper_idx < 12){
+            angular = -M_PI/6;
+            linear = 0.0;
+            L_bumper_idx += 1;
+
+        }
+        else if (L_bumper_idx >= 1){
+            L_bumper_idx = 0;
+
+        }
+
+
+        if (bumper[1] ==kobuki_msgs::BumperEvent::PRESSED) {
+            F_bumper_idx = 1;
+        }
+        //if right bumper is pressed turn to the left
+        else if (bumper[2] ==kobuki_msgs::BumperEvent::PRESSED) {
+            R_bumper_idx = 1;
+        }
+        //if left bumper is pressed turn to the right
+        else if (bumper[0] ==kobuki_msgs::BumperEvent::PRESSED) {
+            L_bumper_idx = 1;
+        }
+        
+        /*
+        //if there is space in front and the bumpers are not pressed go forward
         else if (minLaserDist>1. && !any_bumper_pressed) {
             linear = 0.1;
+
+            //correct robot's trajectory so that its x position is 0.5 andits orientation is 90 degrees
             if (yaw <17 / 36*M_PI || posX>0.6) {
                 angular = -M_PI/12.;
             }
@@ -123,10 +185,16 @@ int main(int argc, char **argv)
             linear =0.0;
             break;
         }
+        */
 
         vel.angular.z = angular;
         vel.linear.x = linear;
         vel_pub.publish(vel);
+
+        // "XXXXX you can print stuff here for debugging XXXXX"
+        std::cout << "XXXXX you can print stuff here for debugging XXXXX" << std::endl;
+        std::cout << "XXXXX you can print stuff here for debugging XXXXX" << std::endl;
+        std::cout << "XXXXX you can print stuff here for debugging XXXXX" << std::endl;
 
         // The last thing to do is to update the timer.
         secondsElapsed = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now()-start).count();
