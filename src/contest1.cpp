@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <cmath>
 #include <chrono>
+#include <math.h>
 
 #include <nav_msgs/Odometry.h>
 #include <tf/transform_datatypes.h>
@@ -56,6 +57,7 @@ void laserCallback(const sensor_msgs::LaserScan::ConstPtr& msg)
 	minLaserDist = std::numeric_limits<float>::infinity();
     nLasers = (msg->angle_max - msg->angle_min)/msg->angle_increment;
     desiredNLasers = desiredAngle*M_PI/(180*msg->angle_increment);
+    // TODO: consider removing this, it gets printed a lot, is it informative?
     ROS_INFO("Size of laser scan array: %i and size of offset: %i", nLasers, desiredNLasers);
 
     if (desiredAngle*M_PI/180 < msg->angle_max && -desiredAngle*M_PI/ 180 > msg->angle_min){
@@ -92,7 +94,6 @@ int randRange(int low, int high){
 void VelPub(float angular, float linear, ros::Publisher vel_pub){
     /*
     Publish a velocity pair using using vel_pub
-    TODO: make vel_pub global so it doesn't need to be passed?
      */
 
     geometry_msgs::Twist vel;
@@ -103,11 +104,9 @@ void VelPub(float angular, float linear, ros::Publisher vel_pub){
     return;
 }
 
-void rotByAngle(float angle, ros::Publisher vel_pub){
+void rotByAngle(float angle, ros::Publisher vel_pub, verbose=true){
     /*
-    Rotates the robot by (angle) degrees
-	while this could be rad the abs() rounds the difference calculation
-	and having a resolution of 1 rad would not be great
+    Rotates the robot by (angle) radians about the z-axis
      */
 
     // Rotate at maximum speed in direction of angle
@@ -117,16 +116,59 @@ void rotByAngle(float angle, ros::Publisher vel_pub){
     ros::spinOnce(); //TODO: if spin stays in main loop maybe remove from here?
     float startYaw = yaw;
 
-    // start spinning
-    VelPub(rotVel, 0.0, vel_pub);
-    ROS_INFO("Rotating by %f radians at vel: %f",angle, rotVel);
-    ROS_INFO("Starting Yaw: %f rad / %f degrees.",yaw,RAD2DEG(yaw));
+    if (verbose){
+        ROS_INFO("Rotating by %f radians at vel: %f", angle, rotVel);
+        ROS_INFO("Starting Yaw: %f rad / %f degrees.", yaw, RAD2DEG(yaw));
+    }
 
     // this might have a problem at wrap-around if switching between -pi and pi
     while (fabs(yaw - startYaw) < fabs(angle)) {    
         // publish to update velocity, spin to update yaw (clears velocity)
-	VelPub(rotVel, 0.0, vel_pub);
-	ros::spinOnce();
+        VelPub(rotVel, 0.0, vel_pub);
+        ros::spinOnce();
+    }
+
+    return;
+}
+
+float eucDist(float x1, float y1, float x2, float y2){
+    // returns euclidean distance between (x1,y1) and (x2,y2)
+    return sqrt(pow((x2-x1), 2) + pow((y2-y1), 2) );
+}
+
+bool bumpersPressed(){
+    /*
+    return 1 if any bumpers are currently being pressed
+     */
+
+    bool any_bumper_pressed = false;
+
+    for(uint32_t b_idx = 0; b_idx < N_BUMPER; ++b_idx) {
+        any_bumper_pressed |= ( bumper[b_idx] == kobuki_msgs::BumperEvent::PRESSED );
+    }
+
+    return any_bumper_pressed;
+}
+
+void stepDistance(float distance, float speed,ros::Publisher vel_pub, verbose=true) {
+    /*
+    Moves the robot forward (distance) units at (speed)
+        stops if there is a collision
+     */
+
+    // get start values
+    ros::spinOnce();
+    float startX = posX, startY = posY;
+
+    if (verbose){
+        ROS_INFO("Stepping %f units at speed: %f", distance, speed);
+        ROS_INFO("Starting Yaw: %f rad / %f degrees.", yaw, RAD2DEG(yaw));
+    }
+
+    while ( (eucDist(startX, startY, posX, posY) < distance) && !(bumpersPressed()) ){
+        // publish to update speed, spin to update pos (clears velocity)
+        VelPub(0.0, speed, vel_pub);
+        ros::spinOnce();
     }
 
     return;
@@ -175,19 +217,13 @@ int main(int argc, char **argv)
     while(ros::ok() && secondsElapsed <= 900) {
         ros::spinOnce();
 
-        rotByAngle(0.1, vel_pub);
-        rotByAngle(-0.1, vel_pub);
-
-        // remove??
-        //vel.angular.z = angular;
-        //vel.linear.x = linear;
-        //vel_pub.publish(vel);
+        rotByAngle(randRange(-M_PI/2, M_PI/2), vel_pub);
+        stepDistance(randRange(0, 100), SPEED_LIM, vel_pub);
 
         // TODO: display type of motion taking place in current loop
+        //          in high-level controller blocks make appropriate print statements
 
         // display motion info
-        //ROS_INFO("Linear  Velocity: %f", linear);
-        //ROS_INFO("Angular Velocity: %f", angular);
         ROS_INFO("Position: (%f,%f) Orientation: %f degrees Range: %f", posX, posY,RAD2DEG(yaw),minLaserDist);
         
         // The last thing to do is to update the timer.
