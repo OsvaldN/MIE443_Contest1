@@ -76,8 +76,6 @@ void odomCallback(const nav_msgs::Odometry::ConstPtr& msg)
     posX = msg->pose.pose.position.x;
     posY = msg->pose.pose.position.y;
     yaw = tf::getYaw(msg->pose.pose.orientation);
-    //tf::getYaw(msg->pose.pose.orientation);
-    //ROS_INFO("Position: (%f,%f) Orientation: %f rad or %f degrees.", posX, posY,yaw,RAD2DEG(yaw));
 }
 
 /*
@@ -121,18 +119,15 @@ void rotByAngle(float angle, ros::Publisher vel_pub){
 
     // start spinning
     VelPub(rotVel, 0.0, vel_pub);
-    ROS_INFO("Set rotation velocity: %f", rotVel);
-    ROS_INFO("Start Orientation: %f rad or %f degrees.",yaw,RAD2DEG(yaw));
-    // this might have a problem at wrap-around if switching between -pi and pi
-    while ((yaw - startYaw) < angle) {    
-        VelPub(rotVel, 0.0, vel_pub);
-	ros::spinOnce();
-	//ROS_INFO("Mid-spin: %f rad, diff: %f, angle: %f, started at: %f",yaw,yaw- startYaw,angle, startYaw);
-    	//exit(0);
-    }
+    ROS_INFO("Rotating by %f radians at vel: %f",angle, rotVel);
+    ROS_INFO("Starting Yaw: %f rad / %f degrees.",yaw,RAD2DEG(yaw));
 
-    // stop rotating
-    VelPub(0.0, 0.0, vel_pub);
+    // this might have a problem at wrap-around if switching between -pi and pi
+    while (fabs(yaw - startYaw) < fabs(angle)) {    
+        // publish to update velocity, spin to update yaw (clears velocity)
+	VelPub(rotVel, 0.0, vel_pub);
+	ros::spinOnce();
+    }
 
     return;
 }
@@ -191,8 +186,8 @@ int main(int argc, char **argv)
         // TODO: display type of motion taking place in current loop
 
         // display motion info
-        ROS_INFO("Linear  Velocity: %f", linear);
-        ROS_INFO("Angular Velocity: %f", angular);
+        //ROS_INFO("Linear  Velocity: %f", linear);
+        //ROS_INFO("Angular Velocity: %f", angular);
         ROS_INFO("Position: (%f,%f) Orientation: %f degrees Range: %f", posX, posY,RAD2DEG(yaw),minLaserDist);
         
         // The last thing to do is to update the timer.
