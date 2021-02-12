@@ -179,6 +179,21 @@ void stepDistance(float distance, float speed,ros::Publisher *vel_pub, bool verb
     return;
 }
 
+void wallFollow(ros::Publisher *vel_pub) {
+    /* 
+    If robot encouters a wall, make a +CCW rotation and keep wall on RHS. Otherwise proceed
+    forward.
+    */
+
+    if (bumpersPressed()) {
+        rotByAngle(M_PI/4, vel_pub);
+    } else {
+        stepDistance(50, SPEED_LIM, vel_pub);
+    }
+
+    return;
+}
+
 void spinAndStep(float step) {
     /*
     Spin 360 then step in direction of most open space
@@ -237,10 +252,13 @@ int main(int argc, char **argv)
         //stepDistance(randRange(0.0, 100.0), SPEED_LIM, &vel_pub);
 	
 
+        wallFollow(&vel_pub); // DEBUG REMOVE
+        /*
         rotByAngle(-M_PI/2, &vel_pub);
         stepDistance(50, SPEED_LIM, &vel_pub);
         rotByAngle(-M_PI/2, &vel_pub);
         stepDistance(100, SPEED_LIM, &vel_pub);
+        */
 
 
         // TODO: display type of motion taking place in current loop
