@@ -12,7 +12,7 @@
 #include <nav_msgs/Odometry.h>
 #include <tf/transform_datatypes.h>
 
-#define MAX_SPINRATE (0.6)
+#define MAX_SPINRATE (M_PI/6)
 #define SPEED_LIM (0.25)
 #define OBS_SPEED_LIM (0.1)
 #define N_BUMPER (3)
