@@ -86,12 +86,13 @@ void odomCallback(const nav_msgs::Odometry::ConstPtr& msg)
 ////////////////////////
 */
 
-int randRange(int low, int high){
+// TODO: test this function out, not sure if it works properly
+int randRange(float low, float high){
     // Uniform random from interval [low, high]
-    return low + ( rand() * (high-low) );
+    return low + ( (rand() / double(RAND_MAX)) * (high-low) );
 }
 
-void VelPub(float angular, float linear, ros::Publisher vel_pub){
+void VelPub(float angular, float linear, ros::Publisher *vel_pub){
     /*
     Publish a velocity pair using using vel_pub
      */
@@ -99,16 +100,17 @@ void VelPub(float angular, float linear, ros::Publisher vel_pub){
     geometry_msgs::Twist vel;
     vel.angular.z = angular;
     vel.linear.x = linear;
-    vel_pub.publish(vel);
+    vel_pub->publish(vel);
 
     return;
 }
 
-void rotByAngle(float angle, ros::Publisher vel_pub, verbose=true){
+void rotByAngle(float angle, ros::Publisher *vel_pub, bool verbose=true){
     /*
     Rotates the robot by (angle) radians about the z-axis
      */
 
+    ros::Rate loop_rate(10);
     // Rotate at maximum speed in direction of angle
     float dir = (angle > 0) - (angle < 0);
     float rotVel = dir * MAX_SPINRATE;
@@ -125,6 +127,7 @@ void rotByAngle(float angle, ros::Publisher vel_pub, verbose=true){
     while (fabs(yaw - startYaw) < fabs(angle)) {    
         // publish to update velocity, spin to update yaw (clears velocity)
         VelPub(rotVel, 0.0, vel_pub);
+        loop_rate.sleep();
         ros::spinOnce();
     }
 
@@ -150,12 +153,13 @@ bool bumpersPressed(){
     return any_bumper_pressed;
 }
 
-void stepDistance(float distance, float speed,ros::Publisher vel_pub, verbose=true) {
+void stepDistance(float distance, float speed,ros::Publisher *vel_pub, bool verbose=true) {
     /*
     Moves the robot forward (distance) units at (speed)
         stops if there is a collision
      */
-
+    
+    ros::Rate loop_rate(10);
     // get start values
     ros::spinOnce();
     float startX = posX, startY = posY;
@@ -168,19 +172,30 @@ void stepDistance(float distance, float speed,ros::Publisher vel_pub, verbose=tr
     while ( (eucDist(startX, startY, posX, posY) < distance) && !(bumpersPressed()) ){
         // publish to update speed, spin to update pos (clears velocity)
         VelPub(0.0, speed, vel_pub);
+        loop_rate.sleep();
         ros::spinOnce();
     }
 
     return;
 }
 
-void spinAndStep() {
+void spinAndStep(float step) {
     /*
     Spin 360 then step in direction of most open space
      */
 
-    //pseudo-code
+    //code here
     
+    return;
+}
+
+void spinToDist(float reqDist, float dir) {
+    /*
+    Rotates in direction (dir) until the laser callback finds an open distance of (reqDist)
+     */
+
+    //spin and scan and then stop once minDist > reqDist
+
     return;
 }
 
@@ -217,8 +232,16 @@ int main(int argc, char **argv)
     while(ros::ok() && secondsElapsed <= 900) {
         ros::spinOnce();
 
-        rotByAngle(randRange(-M_PI/2, M_PI/2), vel_pub);
-        stepDistance(randRange(0, 100), SPEED_LIM, vel_pub);
+	// random spin followed by random step
+        //rotByAngle(randRange(-M_PI/2, M_PI/2), &vel_pub);
+        //stepDistance(randRange(0.0, 100.0), SPEED_LIM, &vel_pub);
+	
+
+        rotByAngle(-M_PI/2, &vel_pub);
+        stepDistance(50, SPEED_LIM, &vel_pub);
+        rotByAngle(-M_PI/2, &vel_pub);
+        stepDistance(100, SPEED_LIM, &vel_pub);
+
 
         // TODO: display type of motion taking place in current loop
         //          in high-level controller blocks make appropriate print statements
