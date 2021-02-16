@@ -105,7 +105,7 @@ void odomCallback(const nav_msgs::Odometry::ConstPtr& msg)
 // TODO: test this function out, not sure if it works properly
 // random number generator
 
-int randRange(float low, float high){ //should this not a return a float not an integer?
+float randRange(float low, float high){
     // Uniform random from interval [low, high]
     return low + ( (rand() / double(RAND_MAX)) * (high-low) );
 }
