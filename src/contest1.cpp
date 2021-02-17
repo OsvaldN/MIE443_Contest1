@@ -18,7 +18,6 @@
 #define N_BUMPER (3)
 #define RAD2DEG(rad) ((rad) *180./M_PI)
 #define DEG2RAD(deg) ((deg) *M_PI /180.)
-#define MIN_LASER_THRESHOLD 100. // Default laser distance for minimum laser distance calculation
 
 uint16_t DEBUG_COUNT = 0; //DEBUG REMOVE
 
@@ -179,7 +178,7 @@ float minDistance(int32_t desiredAngle, bool verbose=false){
     //returns the minimum distance in a view of the desired angle in DEGREES on either side
     
     //set the minimum distance to a very large value where a new smaller value can be found
-    float minLaserDist = MIN_LASER_THRESHOLD;
+    float minLaserDist = std::numeric_limits<float>::infinity();
     int32_t desiredNLasers=0;
     minDistanceDir = 0.0; // store the direction of minimum direction into this global variable
     //determine the number of laser needed to scan the desired angle.  Note: convert desired angle from degrees to radians
@@ -245,8 +244,8 @@ void stepDistance(float distance, float speed,ros::Publisher *vel_pub, bool verb
 
     while ( (eucDist(startX, startY, posX, posY) < distance) && !(bumpersPressed()) ){
         // Check if obstacle infront of Robot before moving
-        minLaserDistance = minDistance(10);
-        if (minLaserDistance < 0.5 || minLaserDistance == MIN_LASER_THRESHOLD) {
+        minLaserDistance = minDistance(15);
+        if (minLaserDistance < 0.5 || std::isinf(minLaserDistance) || std::isnan(minLaserDistance)) {
             break;
         }
 
@@ -287,23 +286,21 @@ float GetYawAngle(float input_angle, bool verbose=false){
 
 void wallFollow(ros::Publisher *vel_pub) {
     /* 
-    If robot encouters a wall, make a +CCW rotation and keep wall on RHS. Otherwise proceed
+    If robot encouters a wall, make a rotation and keep wall on RHS. Otherwise proceed
     forward.
     */
     
-    float minLaserDist = minDistance(10, true); // DEBUG REMOVE verbose
+    float minLaserDist = minDistance(15); 
     
-    if (bumpersPressed() || minLaserDist < 0.5 || minLaserDist == MIN_LASER_THRESHOLD) {
-        
-        float rand = randRange(0.0, 3.0);
-
+    if (bumpersPressed() || minLaserDist < 0.5 || std::isinf(minLaserDist) || std::isnan(minLaserDist)) {
+        float rand = randRange(0.0, 3.0); // Random number used to determine direction of rotation. 60% of the time +CCW rotation
         if (rand < 2.0) { // Randomize the rotation of the robot
             rotByAngle(M_PI/4, vel_pub);
         } else {
             rotByAngle(-M_PI/4, vel_pub);
         }
 
-    } else {
+    } else { // If there are no obstacles detected, proceed forward
         stepDistance(50, SPEED_LIM, vel_pub);
     }
 
@@ -429,7 +426,8 @@ int main(int argc, char **argv)
     while(ros::ok() && secondsElapsed <= 900) {
         ros::spinOnce();
 
-        wallFollow(&vel_pub); 
+        // Uncomment below to test wallFollow functionality
+        //wallFollow(&vel_pub); 
         
 	    // random spin followed by random step example
         //rotByAngle(randRange(-M_PI/2, M_PI/2), &vel_pub);
