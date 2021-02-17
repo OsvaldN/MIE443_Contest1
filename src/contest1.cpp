@@ -105,24 +105,27 @@ void odomCallback(const nav_msgs::Odometry::ConstPtr& msg)
 ////////////////////////
 */
 
-// TODO: test this function out, not sure if it works properly
-// random number generator
 
+// random number generator
 float randRange(float low, float high){
     // Uniform random from interval [low, high]
     return low + ( (rand() / double(RAND_MAX)) * (high-low) );
 }
 
-void VelPub(float angular, float linear, ros::Publisher *vel_pub){
-    /*
-    Publish a velocity pair using using vel_pub
-     */
+float angleCorrect(float curr, float start){
+    // corrects angle discontinuity in yaw
+    float x = fabs(curr-start);
+    float y = fabs(360+curr-start);
+    float z = fabs(-360+curr-start);
+    return x < y ? (x < z ? x : z) : (y < z ? y : z); // bootleg way to get min of the three
+}
 
+void VelPub(float angular, float linear, ros::Publisher *vel_pub){
+    //Publish a velocity pair using using vel_pub
     geometry_msgs::Twist vel;
     vel.angular.z = angular;
     vel.linear.x = linear;
     vel_pub->publish(vel);
-
     return;
 }
 
@@ -145,7 +148,7 @@ void rotByAngle(float angle, ros::Publisher *vel_pub, bool verbose=true){
     }
 
     // this might have a problem at wrap-around if switching between -pi and pi
-    while (fabs(yaw - startYaw) < fabs(angle)) {    
+    while (angleCorrect(yaw, startYaw) < fabs(angle)) {    
         // publish to update velocity, spin to update yaw (clears velocity)
         VelPub(rotVel, 0.0, vel_pub);
         loop_rate.sleep();
@@ -161,9 +164,7 @@ float eucDist(float x1, float y1, float x2, float y2){
 }
 
 bool bumpersPressed(){
-    /*
-    return 1 if any bumpers are currently being pressed
-     */
+    //return 1 if any bumpers are currently being pressed
 
     bool any_bumper_pressed = false;
 
@@ -179,8 +180,8 @@ float minDistance(int32_t desiredAngle, bool verbose=false){
     
     //set the minimum distance to a very large value where a new smaller value can be found
     float minLaserDist = MIN_LASER_THRESHOLD;
-    int32_t  desiredNLasers=0;
-    minDistanceDir = -1.0; // store the direction of minimum direction into this global variable
+    int32_t desiredNLasers=0;
+    minDistanceDir = 0.0; // store the direction of minimum direction into this global variable
     //determine the number of laser needed to scan the desired angle.  Note: convert desired angle from degrees to radians
     desiredNLasers = desiredAngle*M_PI/(179*laser_ang_increment);
 
@@ -309,26 +310,87 @@ void wallFollow(ros::Publisher *vel_pub) {
     return;
 }
 
-void spinAndStep(float step) {
+void spinAndStep(float stepSize, float speed, int Nbins, ros::Publisher *vel_pub, bool verbose=true) {
     /*
-    Spin 360 then step in direction of most open space
-
-    To prevent going backward maybe only move in a direction in the forawrd facing feild of view (maybe 240 degrees windwow instad of 360)
-    unless it is in a corner and all angles are very small then it should turn around
-
+    Spin 360 then step in direction of most open space by (stepSize) with a velocity of (speed)
+    Divides 360 into Nbins equal sections and scans each section
     */
 
-    //code here
+    float binAngle = 360 / Nbins;
+    float binDistances[Nbins];
+    int maxBin=0;
+
+    for (int i=0; i < Nbins; i++){
+        // TODO: play around with passing a smaller binAngle so it doesn't get minDist triggered from walls to the side of the robot
+        binDistances[i] = minDistance(binAngle, false);
+        if (verbose) {
+            ROS_INFO("Bin %d/%d min dist: %f", i+1, Nbins, binDistances[i]);
+        }
+        // update only if binDist is larger and not NaN or inf
+        if ( !(std::isnan(binDistances[i]) || std::isinf(binDistances[i])) ){
+            if ( (binDistances[i] > binDistances[maxBin]) || std::isinf(binDistances[maxBin]) ){
+                maxBin = i;
+            }
+        }
+        // skip final rotation
+        if (i < (Nbins-1)){
+            rotByAngle(DEG2RAD(binAngle), vel_pub, false);
+        }
+    }
+
+    if (verbose) {
+        ROS_INFO("Stepping %f at %f speed in bin %d/%d", stepSize, speed, maxBin+1, Nbins);
+    }
+
+    //rotate to proper bin
+    bool CCW = ((maxBin+1) < (Nbins-1-maxBin));
+
+    if ( (maxBin != (Nbins)) && CCW ){
+        // faster to spin CCW
+        rotByAngle( (maxBin+1) * DEG2RAD(binAngle), vel_pub, false);
+    }
+    else if ( (maxBin != (Nbins)) && !(CCW) ){
+        // faster to spin CW
+        rotByAngle( -(Nbins-1-maxBin) * DEG2RAD(binAngle), vel_pub, false);
+    }
     
+    stepDistance(stepSize, speed, vel_pub, false);
+
     return;
 }
 
-void spinToDist(float reqDist, float dir) {
+void spinToDist(float stepSize, float speed, float reqDist, float dir, float increment, ros::Publisher *vel_pub, bool verbose=true ) {
     /*
-    Rotates in direction (dir) until the laser callback finds an open distance of (reqDist)
+    Rotates in direction (dir) until the laser callback finds an open distance of (reqDist) at velocity (speed)
+    If no bin has reqDist space available the robot will step forward at the last bin.
+    dir: 1 for CCW, -1 for CW rotation
+    increment: degrees to rotate between each scan
     */
 
-    //spin and scan and then stop once minDist > reqDist
+    float travelled = 0;
+    float currDist;
+    
+    while (travelled < 360){
+        // Check 30 degree fan in front of current position
+        // TODO: try other fan distances
+        currDist = minDistance(15, false);
+        if (verbose) {
+            ROS_INFO("%f degrees relative rotation, min dist: %f", dir*travelled, currDist);
+        }
+
+        if (currDist >= reqDist && !(std::isinf(currDist)) ) {
+            break;
+        }
+
+        rotByAngle(dir * DEG2RAD(increment), vel_pub, false);
+        travelled += increment;
+    }
+
+    if (verbose) {
+        ROS_INFO("Stepping %f at %f speed at relative angle %f", stepSize, speed, dir*travelled);
+    }
+
+    stepDistance(stepSize, speed, vel_pub, false);
 
     return;
 }
@@ -369,6 +431,21 @@ int main(int argc, char **argv)
 
         wallFollow(&vel_pub); 
         
+	    // random spin followed by random step example
+        //rotByAngle(randRange(-M_PI/2, M_PI/2), &vel_pub);
+        //stepDistance(randRange(0.0, 100.0), SPEED_LIM, &vel_pub);
+
+        spinAndStep(1, SPEED_LIM, 5, &vel_pub);
+        spinToDist(2, SPEED_LIM, 1, 1, 30, &vel_pub);
+
+        /*
+        rotByAngle(-M_PI/2, &vel_pub);
+        stepDistance(50, SPEED_LIM, &vel_pub);
+        rotByAngle(-M_PI/2, &vel_pub);
+        stepDistance(100, SPEED_LIM, &vel_pub);
+        */
+
+
         // TODO: display type of motion taking place in current loop
         //          in high-level controller blocks make appropriate print statements
 
