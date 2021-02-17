@@ -18,6 +18,9 @@
 #define N_BUMPER (3)
 #define RAD2DEG(rad) ((rad) *180./M_PI)
 #define DEG2RAD(deg) ((deg) *M_PI /180.)
+#define MIN_LASER_THRESHOLD 100. // Default laser distance for minimum laser distance calculation
+
+uint16_t DEBUG_COUNT = 0; //DEBUG REMOVE
 
 //variables for rotational speed and linear speed
 float angular = 0.0;
@@ -171,44 +174,18 @@ bool bumpersPressed(){
     return any_bumper_pressed;
 }
 
-void stepDistance(float distance, float speed,ros::Publisher *vel_pub, bool verbose=true) {
-    /*
-    Moves the robot forward (distance) units at (speed)
-        stops if there is a collision
-     */
-    
-    ros::Rate loop_rate(10);
-    // get start values
-    ros::spinOnce();
-    float startX = posX, startY = posY;
-
-    if (verbose){
-        ROS_INFO("Stepping %f units at speed: %f", distance, speed);
-        ROS_INFO("Starting Yaw: %f rad / %f degrees.", yaw, RAD2DEG(yaw));
-    }
-
-    while ( (eucDist(startX, startY, posX, posY) < distance) && !(bumpersPressed()) ){
-        // publish to update speed, spin to update pos (clears velocity)
-        VelPub(0.0, speed, vel_pub);
-        loop_rate.sleep();
-        ros::spinOnce();
-    }
-
-    return;
-}
-
-float minDistance(int32_t desiredAngle, bool verbose=true){
+float minDistance(int32_t desiredAngle, bool verbose=false){
     //returns the minimum distance in a view of the desired angle in DEGREES on either side
     
     //set the minimum distance to a very large value where a new smaller value can be found
-    float minLaserDist = std::numeric_limits<float>::infinity();
+    float minLaserDist = MIN_LASER_THRESHOLD;
     int32_t  desiredNLasers=0;
-    minDistanceDir = 0.0; // store the direction of minimum direction into this global variable
+    minDistanceDir = -1.0; // store the direction of minimum direction into this global variable
     //determine the number of laser needed to scan the desired angle.  Note: convert desired angle from degrees to radians
-    desiredNLasers = desiredAngle*M_PI/(180*laser_ang_increment);
+    desiredNLasers = desiredAngle*M_PI/(179*laser_ang_increment);
 
     //search the range from the negative and positve desired angle (converted to radians)
-    if (desiredAngle*M_PI/180 < laser_max_ang && -desiredAngle*M_PI/ 180 > laser_min_ang){
+    if (desiredAngle*M_PI/179 < laser_max_ang && -desiredAngle*M_PI/ 180 > laser_min_ang){
    
         for (uint32_t laser_idx = nLasers/2-desiredNLasers; laser_idx < nLasers/2+desiredNLasers; ++laser_idx){
 
@@ -220,7 +197,7 @@ float minDistance(int32_t desiredAngle, bool verbose=true){
         }
 
         if (verbose){
-            ROS_INFO("Search in range: %i to %i degrees with %i number of lasers", -desiredAngle, desiredAngle, 2*desiredNLasers);
+            ROS_INFO("Search in range: %i to %i degrees with %i number of lasers", -desiredAngle, desiredAngle, 1*desiredNLasers);
             ROS_INFO("minLaserDist measured is: %f and it direction relative to the robot is %f CCW", minLaserDist, minDistanceDir);
         }
 
@@ -233,6 +210,7 @@ float minDistance(int32_t desiredAngle, bool verbose=true){
                 minDistanceDir = LaserArrayAng[laser_idx];
             }
             minLaserDist = std::min(minLaserDist, LaserArray[laser_idx]);
+            
 
         }
 
@@ -246,7 +224,42 @@ float minDistance(int32_t desiredAngle, bool verbose=true){
     return minLaserDist;
 }
 
-float GetYawAngle(float input_angle, bool verbose=true){
+
+void stepDistance(float distance, float speed,ros::Publisher *vel_pub, bool verbose=true) {
+    /*
+    Moves the robot forward (distance) units at (speed)
+        stops if there is a collision
+     */
+    
+    ros::Rate loop_rate(10);
+    // get start values
+    ros::spinOnce();
+    float startX = posX, startY = posY;
+    float minLaserDistance; // Check the min distance from the laser reading
+
+    if (verbose){
+        ROS_INFO("Stepping %f units at speed: %f", distance, speed);
+        ROS_INFO("Starting Yaw: %f rad / %f degrees.", yaw, RAD2DEG(yaw));
+    }
+
+    while ( (eucDist(startX, startY, posX, posY) < distance) && !(bumpersPressed()) ){
+        // Check if obstacle infront of Robot before moving
+        minLaserDistance = minDistance(10);
+        if (minLaserDistance < 0.5 || minLaserDistance == MIN_LASER_THRESHOLD) {
+            break;
+        }
+
+        // publish to update speed, spin to update pos (clears velocity)
+        VelPub(0.0, speed, vel_pub);
+        loop_rate.sleep();
+        ros::spinOnce();
+    }
+
+    return;
+}
+
+
+float GetYawAngle(float input_angle, bool verbose=false){
 
     //input the angle relative to the robot (eg. LaserArrayAng[0] which is -0.52rad CCW offset (or all the way to the right) from directly in front of the robot)
     //and return the Yaw angle of that ranging from -pi to pi (in radians)
@@ -276,9 +289,19 @@ void wallFollow(ros::Publisher *vel_pub) {
     If robot encouters a wall, make a +CCW rotation and keep wall on RHS. Otherwise proceed
     forward.
     */
+    
+    float minLaserDist = minDistance(10, true); // DEBUG REMOVE verbose
+    
+    if (bumpersPressed() || minLaserDist < 0.5 || minLaserDist == MIN_LASER_THRESHOLD) {
+        
+        float rand = randRange(0.0, 3.0);
 
-    if (bumpersPressed()) {
-        rotByAngle(M_PI/4, vel_pub);
+        if (rand < 2.0) { // Randomize the rotation of the robot
+            rotByAngle(M_PI/4, vel_pub);
+        } else {
+            rotByAngle(-M_PI/4, vel_pub);
+        }
+
     } else {
         stepDistance(50, SPEED_LIM, vel_pub);
     }
@@ -344,30 +367,8 @@ int main(int argc, char **argv)
     while(ros::ok() && secondsElapsed <= 900) {
         ros::spinOnce();
 
-	    // random spin followed by random step
-        //rotByAngle(randRange(-M_PI/2, M_PI/2), &vel_pub);
-        //stepDistance(randRange(0.0, 100.0), SPEED_LIM, &vel_pub);
-	
-
-        wallFollow(&vel_pub); // DEBUG REMOVE
+        wallFollow(&vel_pub); 
         
-        // !!!!!!!!!!! example of David's new code below Feb 16 - Please remove if understood !!!!!!!!!!!
-        minDistance(10); //returns the minimum distance in a range of +- 10 degrees in front of the robot
-        //the direction relative to the robot of the this minimum distance is stored in minDistanceDir
-
-        //returns the Yaw of the angle relative to the robot stared in LaserArrayAng
-        GetYawAngle(LaserArrayAng[0]); //this is all the way to the right of the sensor FOV
-        GetYawAngle(LaserArrayAng[319]); //this is directly ahead of the robot so should match the robots yaw
-        // !!!!!!!!!!! example of David's new code above Feb 16 - Please remove if understood !!!!!!!!!!!!!
-
-        /*
-        rotByAngle(-M_PI/2, &vel_pub);
-        stepDistance(50, SPEED_LIM, &vel_pub);
-        rotByAngle(-M_PI/2, &vel_pub);
-        stepDistance(100, SPEED_LIM, &vel_pub);
-        */
-
-
         // TODO: display type of motion taking place in current loop
         //          in high-level controller blocks make appropriate print statements
 
