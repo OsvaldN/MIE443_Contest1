@@ -174,51 +174,79 @@ bool bumpersPressed(){
     return any_bumper_pressed;
 }
 
-float minDistance(int32_t desiredAngle, bool verbose=false){
+float minDistance(int32_t desiredAngleR, int32_t desiredAngleL=std::numeric_limits<int32_t>::infinity(), bool verbose=false){
     //returns the minimum distance in a view of the desired angle in DEGREES on either side
     
+    //if nothing set for the range to the left default it to equal to the right side
+    if (desiredAngleL == std::numeric_limits<int32_t>::infinity()){
+        desiredAngleL = desiredAngleR;
+    }
+
     //set the minimum distance to a very large value where a new smaller value can be found
     float minLaserDist = std::numeric_limits<float>::infinity();
-    int32_t desiredNLasers=0;
+
+    int32_t desiredNLasersR=0, desiredNLasersL=0;
     minDistanceDir = 0.0; // store the direction of minimum direction into this global variable
+
     //determine the number of laser needed to scan the desired angle.  Note: convert desired angle from degrees to radians
-    desiredNLasers = desiredAngle*M_PI/(179*laser_ang_increment);
+    desiredNLasersR = desiredAngleR*M_PI/(180*laser_ang_increment);
+    desiredNLasersL = desiredAngleL*M_PI/(180*laser_ang_increment);
 
-    //search the range from the negative and positve desired angle (converted to radians)
-    if (desiredAngle*M_PI/179 < laser_max_ang && -desiredAngle*M_PI/ 180 > laser_min_ang){
-   
-        for (uint32_t laser_idx = nLasers/2-desiredNLasers; laser_idx < nLasers/2+desiredNLasers; ++laser_idx){
+    //If it has not connected to the sensor yet, nLasers will be 0 which will cause a fault
+    if (nLasers == 0 ){
+        nLasers = 2;
+    }
 
-            if (LaserArray[laser_idx] < minLaserDist){
-                minDistanceDir = LaserArrayAng[laser_idx];
-            }
-            minLaserDist = std::min(minLaserDist, LaserArray[laser_idx]);
-            
-        }
+    //return minDistance = inf if the ranges were inputed incorrectly
+    if (-desiredAngleR >= desiredAngleL ){
 
-        if (verbose){
-            ROS_INFO("Search in range: %i to %i degrees with %i number of lasers", -desiredAngle, desiredAngle, 1*desiredNLasers);
-            ROS_INFO("minLaserDist measured is: %f and it direction relative to the robot is %f CCW", minLaserDist, minDistanceDir);
+        ROS_INFO("Search range is not applicable since left range is more to right than the right range");
+        return minLaserDist;
+
+    }
+
+    //fix if the values exceed the sensor abilities
+    if (-desiredAngleR*M_PI/180 < laser_min_ang ){
+
+        desiredNLasersR = nLasers/2;
+        ROS_INFO("Search range to the right %i exceeds the right limit of the sensor so it set to the max", desiredAngleR);
+
+        if (desiredAngleL*M_PI/180 < laser_min_ang ){
+
+            desiredNLasersL = 0;
+            ROS_INFO("Search range to the left %i exceeds the right limit of the sensor so it is reset to 0 degrees", desiredAngleL);
+
         }
 
     }
-    //if the desired angle is larger than the sensor field, use the maximum angle
-    else {
-        for(uint32_t laser_idx = 0; laser_idx < nLasers; ++laser_idx){
+    if ( desiredAngleL*M_PI/ 180 > laser_max_ang ){
 
-            if (LaserArray[laser_idx] < minLaserDist){
-                minDistanceDir = LaserArrayAng[laser_idx];
-            }
-            minLaserDist = std::min(minLaserDist, LaserArray[laser_idx]);
-            
+        desiredNLasersL = nLasers/2 - 1;
+        ROS_INFO("Search range to the left %i exceeds the left limit of the sensor so it is set to the max", desiredAngleL);
+
+        if (-desiredAngleR*M_PI/180 > laser_max_ang ){
+
+            desiredNLasersR = 0;
+            ROS_INFO("Search range to the right %i exceeds the left limit of the sensor so it is reset to 0 degrees", desiredAngleR);
 
         }
 
-        if (verbose){
-            ROS_INFO("Search max range of laser with max number of lasers which is %i", nLasers);
-            ROS_INFO("minLaserDist measured is: %f and it direction relative to the robot is %f CCW", minLaserDist, minDistanceDir);
-        }
+    }
 
+    for (uint32_t laser_idx = nLasers/2-desiredNLasersR; laser_idx < nLasers/2+desiredNLasersL; ++laser_idx){
+
+        if (LaserArray[laser_idx] < minLaserDist){
+            minDistanceDir = LaserArrayAng[laser_idx];
+        }
+        minLaserDist = std::min(minLaserDist, LaserArray[laser_idx]);
+        
+    }
+
+    int32_t totalNLasers = desiredNLasersL + desiredNLasersR;
+
+    if (verbose){
+        ROS_INFO("Search in range: %i degrees to the right to %i degrees to the left with %i total number of lasers", desiredAngleR, desiredAngleL, totalNLasers);
+        ROS_INFO("minLaserDist measured is: %f and it direction relative to the robot is %f CCW", minLaserDist, minDistanceDir);
     }
 
     return minLaserDist;
@@ -433,8 +461,10 @@ int main(int argc, char **argv)
         //rotByAngle(randRange(-M_PI/2, M_PI/2), &vel_pub);
         //stepDistance(randRange(0.0, 100.0), SPEED_LIM, &vel_pub);
 
+
         spinAndStep(1, SPEED_LIM, 5, &vel_pub);
         spinToDist(2, SPEED_LIM, 1, 1, 30, &vel_pub);
+
 
         /*
         rotByAngle(-M_PI/2, &vel_pub);
