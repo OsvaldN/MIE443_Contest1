@@ -19,6 +19,7 @@
 #define RAD2DEG(rad) ((rad) *180./M_PI)
 #define DEG2RAD(deg) ((deg) *M_PI /180.)
 #define NO_BUMPER_DEPRESSED -1
+#define MIN_LASER_DIST 0.6
 
 void laserObstacleDirectionHandler(ros::Publisher *vel_pub, bool verbose);
 
@@ -280,6 +281,12 @@ float minDistance(int32_t desiredAngleR, int32_t desiredAngleL=std::numeric_limi
     return minLaserDist;
 }
 
+void stuck_check() {
+
+    return;
+
+}
+
 
 void stepDistance(float distance, float speed,ros::Publisher *vel_pub, bool verbose=true, bool reverse=false) {
     /*
@@ -301,8 +308,8 @@ void stepDistance(float distance, float speed,ros::Publisher *vel_pub, bool verb
     while ( (eucDist(startX, startY, posX, posY) < distance) && !(bumpersPressed()) ){
         // Check if obstacle infront of Robot before moving
         minLaserDistance = minDistance(15);
-        if (minLaserDistance < 0.5 || std::isinf(minLaserDistance) || std::isnan(minLaserDistance)) {
-            laserObstacleDirectionHandler(vel_pub, true);
+        if (minLaserDistance < MIN_LASER_DIST || std::isinf(minLaserDistance) || std::isnan(minLaserDistance)) {
+            laserObstacleDirectionHandler(vel_pub, true); // DEBUG: Change verbosity to false to limit console messages
         }
 
         // publish to update speed, spin to update pos (clears velocity)
@@ -343,7 +350,7 @@ void spinAndStep(float stepSize, float speed, int Nbins, ros::Publisher *vel_pub
         }
         // skip final rotation
         if (i < (Nbins-1)){
-            rotByAngle(DEG2RAD(binAngle), vel_pub, false);
+            rotByAngle(DEG2RAD(binAngle), vel_pub, false); 
         }
     }
 
@@ -374,19 +381,19 @@ void laserObstacleDirectionHandler(ros::Publisher *vel_pub, bool verbose=false) 
     float right_minLaserDist = minDistance(15, 0); 
 
     // If the object is right infront of the robot, do spin, and choose direction of most space
-    if ((left_minLaserDist < 0.5 && right_minLaserDist < 0.5) || (std::isinf(left_minLaserDist) && std::isinf(right_minLaserDist)) || (std::isnan(left_minLaserDist) &&std::isnan(right_minLaserDist))) {
+    if ((left_minLaserDist < MIN_LASER_DIST && right_minLaserDist < MIN_LASER_DIST) || (std::isinf(left_minLaserDist) && std::isinf(right_minLaserDist)) || (std::isnan(left_minLaserDist) && std::isnan(right_minLaserDist))) {
         if (verbose) {
             ROS_INFO("DEBUG: obj detected FRONT, SPIN");
         }
         spinAndStep(1, SPEED_LIM, 5, vel_pub);
 
-    } else if (left_minLaserDist < 0.5 || std::isinf(left_minLaserDist) || std::isnan(left_minLaserDist)) { // If the object is detected to be on the left, make a -CW rotation
+    } else if (left_minLaserDist < MIN_LASER_DIST || std::isinf(left_minLaserDist) || std::isnan(left_minLaserDist)) { // If the object is detected to be on the left, make a -CW rotation
         if (verbose) {
             ROS_INFO("DEBUG: obj detected LEFT, turn RIGHT"); 
         }
         rotByAngle(-M_PI/6, vel_pub);
 
-    } else if (right_minLaserDist < 0.5 || std::isinf(right_minLaserDist) || std::isnan(right_minLaserDist)) { // If the object is detected to be on the right, make a -CW rotation
+    } else if (right_minLaserDist < MIN_LASER_DIST || std::isinf(right_minLaserDist) || std::isnan(right_minLaserDist)) { // If the object is detected to be on the right, make a -CW rotation
         if (verbose) {
             ROS_INFO("DEBUG: obj detected RIGHT, turn LEFT"); 
         }
@@ -450,7 +457,7 @@ void spinToDist(float stepSize, float speed, float reqDist, float dir, float inc
             break;
         }
 
-        rotByAngle(dir * DEG2RAD(increment), vel_pub, false);
+        rotByAngle(dir * DEG2RAD(increment), vel_pub, false); 
         travelled += increment;
     }
 
@@ -490,8 +497,8 @@ void wallFollow(ros::Publisher *vel_pub) {
             rotByAngle(M_PI/6, vel_pub);
         }
 
-    } else if (minLaserDist < 0.5 || std::isinf(minLaserDist) || std::isnan(minLaserDist)) { // If an obstacle is detected by the laser scan
-        // DEBUG REMOVE - turn of verbose (set to false)
+    } else if (minLaserDist < MIN_LASER_DIST || std::isinf(minLaserDist) || std::isnan(minLaserDist)) { // If an obstacle is detected by the laser scan
+        // DEBUG - turn off verbose (set to false)
         laserObstacleDirectionHandler(vel_pub, true); // Handle the detected object from laser scan based on direction of object.
     } else { // If there are no obstacles detected, proceed forward
         stepDistance(50, SPEED_LIM, vel_pub);
