@@ -559,28 +559,11 @@ int main(int argc, char **argv)
     while(ros::ok() && secondsElapsed <= 900) {
         ros::spinOnce();
 
+        // Implementation for Wall Follow algo
         // Step #1: Scan surroundings and determine direction of most open space
-        //spinAndStep(1, SPEED_LIM, 5, &vel_pub);
+        spinAndStep(1, SPEED_LIM, 5, &vel_pub);
         // Step #2: Perform wall follow operation
-        //wallFollow(&vel_pub); 
-
-        
-	    // random spin followed by random step example
-        //rotByAngle(randRange(-M_PI/2, M_PI/2), &vel_pub);
-        //stepDistance(randRange(0.0, 100.0), SPEED_LIM, &vel_pub);
-
-        //spinAndStep(1, SPEED_LIM, 5, &vel_pub);
-        //spinToDist(2, SPEED_LIM, 1, 1, 30, &vel_pub);
-
-
-        rotByAngle(-M_PI/2, &vel_pub);
-        stepDistance(1, SPEED_LIM, &vel_pub);
-        rotByAngle(M_PI/2, &vel_pub);
-        stepDistance(2, SPEED_LIM, &vel_pub);
-
-
-        // TODO: display type of motion taking place in current loop
-        //          in high-level controller blocks make appropriate print statements
+        wallFollow(&vel_pub); 
 
         // display motion info
         ROS_INFO("Position: (%f,%f) Orientation: %f degrees", posX, posY,RAD2DEG(yaw));
