@@ -8,6 +8,7 @@
 #include <cmath>
 #include <chrono>
 #include <math.h>
+#include <queue>
 
 #include <nav_msgs/Odometry.h>
 #include <tf/transform_datatypes.h>
@@ -130,33 +131,46 @@ void VelPub(float angular, float linear, ros::Publisher *vel_pub){
     return;
 }
 
-void rotByAngle(float angle, ros::Publisher *vel_pub, bool verbose=true){
-    /*
-    Rotates the robot by (angle) radians about the z-axis
-     */
+int rotByAngle(float angle, ros::Publisher *vel_pub, bool verbose=true){
+    //Rotates the robot by (angle) radians about the z-axis
 
     ros::Rate loop_rate(10);
     // Rotate at maximum speed in direction of angle
     float dir = (angle > 0) - (angle < 0);
     float rotVel = dir * MAX_SPINRATE;
 
-    ros::spinOnce(); //TODO: if spin stays in main loop maybe remove from here?
+    ros::spinOnce();
     float startYaw = yaw;
+    float lastYaw = yaw;
+    
+    // initiate queue of past yaws with infs
+    std::queue<float> yawQueue;
+    for (int i=0;i<5;i++) { yawQueue.push(std::numeric_limits<float>::infinity());}
 
     if (verbose){
         ROS_INFO("Rotating by %f radians at vel: %f", angle, rotVel);
         ROS_INFO("Starting Yaw: %f rad / %f degrees.", yaw, RAD2DEG(yaw));
     }
 
-    // this might have a problem at wrap-around if switching between -pi and pi
     while (angleCorrect(yaw, startYaw) < fabs(angle)) {    
         // publish to update velocity, spin to update yaw (clears velocity)
         VelPub(rotVel, 0.0, vel_pub);
         loop_rate.sleep();
         ros::spinOnce();
+	
+        //update yawQueue and check distance travelled
+        yawQueue.push(yaw);
+        yawQueue.pop();
+        // if last 5 spins don't meet 0.05rad threshold rotation then give up
+        if (angleCorrect(yawQueue.front(), yawQueue.back()) < 0.05) {
+            if (verbose) {
+                ROS_INFO("Got stuck trying to turn after %f degrees", RAD2DEG(angleCorrect(yaw, startYaw)) );
+            }
+            return 1;
+        }
     }
 
-    return;
+    return 0;
 }
 
 float eucDist(float x1, float y1, float x2, float y2){
@@ -288,7 +302,7 @@ void stuck_check() {
 }
 
 
-void stepDistance(float distance, float speed,ros::Publisher *vel_pub, bool verbose=true, bool reverse=false) {
+int stepDistance(float distance, float speed,ros::Publisher *vel_pub, bool verbose=true, bool reverse=false) {
     /*
     Moves the robot forward (distance) units at (speed)
         stops if there is a collision
@@ -323,7 +337,11 @@ void stepDistance(float distance, float speed,ros::Publisher *vel_pub, bool verb
         ros::spinOnce();
     }
 
-    return;
+    if (bumpersPressed()){
+	return 1;
+    }
+
+    return 0;
 }
 
 void spinAndStep(float stepSize, float speed, int Nbins, ros::Publisher *vel_pub, bool verbose=true) {
@@ -542,9 +560,9 @@ int main(int argc, char **argv)
         ros::spinOnce();
 
         // Step #1: Scan surroundings and determine direction of most open space
-        spinAndStep(1, SPEED_LIM, 5, &vel_pub);
+        //spinAndStep(1, SPEED_LIM, 5, &vel_pub);
         // Step #2: Perform wall follow operation
-        wallFollow(&vel_pub); 
+        //wallFollow(&vel_pub); 
 
         
 	    // random spin followed by random step example
@@ -555,12 +573,10 @@ int main(int argc, char **argv)
         //spinToDist(2, SPEED_LIM, 1, 1, 30, &vel_pub);
 
 
-        /*
         rotByAngle(-M_PI/2, &vel_pub);
-        stepDistance(50, SPEED_LIM, &vel_pub);
-        rotByAngle(-M_PI/2, &vel_pub);
-        stepDistance(100, SPEED_LIM, &vel_pub);
-        */
+        stepDistance(1, SPEED_LIM, &vel_pub);
+        rotByAngle(M_PI/2, &vel_pub);
+        stepDistance(2, SPEED_LIM, &vel_pub);
 
 
         // TODO: display type of motion taking place in current loop
