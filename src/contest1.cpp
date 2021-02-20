@@ -511,8 +511,17 @@ void wallFollow(ros::Publisher *vel_pub) {
         // Determine which bumper made contact with the object
         if (b_index == 0) { // Left-most bumper depressed, perform -CW rotation
             rotByAngle(-M_PI/6, vel_pub);
-        } else if (b_index == 1 || b_index == 2) { // Front and right-most bumper depressed, perform +CCW rotation
+        } else if (b_index == 1) { // Front depressed, perform random rotation (either +CCW/-CW)
+            float rand_direction = randRange(0.0, 1.0); // Generate a random value to determine direction of rotation
+
+            if (rand_direction < 0.5) {
+                rotByAngle(M_PI/6, vel_pub);
+            } else {
+                rotByAngle(-M_PI/6, vel_pub);
+            }
+        } else { // Right-most bumper depressed, perform +CCW rotation
             rotByAngle(M_PI/6, vel_pub);
+
         }
 
     } else if (minLaserDist < MIN_LASER_DIST || std::isinf(minLaserDist) || std::isnan(minLaserDist)) { // If an obstacle is detected by the laser scan
