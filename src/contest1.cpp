@@ -562,15 +562,13 @@ int main(int argc, char **argv)
     start = std::chrono::system_clock::now();
     uint64_t secondsElapsed = 0;
     
-    // random seed
-    //srand(0)
+    // Implementation for Wall Follow algo
+    // Step #1: Scan surroundings and determine direction of most open space
+    spinAndStep(1, SPEED_LIM, 5, &vel_pub);
 
     while(ros::ok() && secondsElapsed <= 900) {
         ros::spinOnce();
 
-        // Implementation for Wall Follow algo
-        // Step #1: Scan surroundings and determine direction of most open space
-        spinAndStep(1, SPEED_LIM, 5, &vel_pub);
         // Step #2: Perform wall follow operation
         wallFollow(&vel_pub); 
 
