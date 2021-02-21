@@ -8,7 +8,6 @@
 #include <cmath>
 #include <chrono>
 #include <math.h>
-#include <queue>
 
 #include <nav_msgs/Odometry.h>
 #include <tf/transform_datatypes.h>
@@ -19,10 +18,8 @@
 #define N_BUMPER (3)
 #define RAD2DEG(rad) ((rad) *180./M_PI)
 #define DEG2RAD(deg) ((deg) *M_PI /180.)
-#define NO_BUMPER_DEPRESSED -1
-#define MIN_LASER_DIST 0.6
 
-void laserObstacleDirectionHandler(ros::Publisher *vel_pub, bool verbose);
+uint16_t DEBUG_COUNT = 0; //DEBUG REMOVE
 
 //variables for rotational speed and linear speed
 float angular = 0.0;
@@ -131,46 +128,33 @@ void VelPub(float angular, float linear, ros::Publisher *vel_pub){
     return;
 }
 
-int rotByAngle(float angle, ros::Publisher *vel_pub, bool verbose=true){
-    //Rotates the robot by (angle) radians about the z-axis
+void rotByAngle(float angle, ros::Publisher *vel_pub, bool verbose=true){
+    /*
+    Rotates the robot by (angle) radians about the z-axis
+     */
 
     ros::Rate loop_rate(10);
     // Rotate at maximum speed in direction of angle
     float dir = (angle > 0) - (angle < 0);
     float rotVel = dir * MAX_SPINRATE;
 
-    ros::spinOnce();
+    ros::spinOnce(); //TODO: if spin stays in main loop maybe remove from here?
     float startYaw = yaw;
-    float lastYaw = yaw;
-    
-    // initiate queue of past yaws with infs
-    std::queue<float> yawQueue;
-    for (int i=0;i<5;i++) { yawQueue.push(std::numeric_limits<float>::infinity());}
 
     if (verbose){
         ROS_INFO("Rotating by %f radians at vel: %f", angle, rotVel);
         ROS_INFO("Starting Yaw: %f rad / %f degrees.", yaw, RAD2DEG(yaw));
     }
 
+    // this might have a problem at wrap-around if switching between -pi and pi
     while (angleCorrect(yaw, startYaw) < fabs(angle)) {    
         // publish to update velocity, spin to update yaw (clears velocity)
         VelPub(rotVel, 0.0, vel_pub);
         loop_rate.sleep();
         ros::spinOnce();
-	
-        //update yawQueue and check distance travelled
-        yawQueue.push(yaw);
-        yawQueue.pop();
-        // if last 5 spins don't meet 0.05rad threshold rotation then give up
-        if (angleCorrect(yawQueue.front(), yawQueue.back()) < 0.05) {
-            if (verbose) {
-                ROS_INFO("Got stuck trying to turn after %f degrees", RAD2DEG(angleCorrect(yaw, startYaw)) );
-            }
-            return 1;
-        }
     }
 
-    return 0;
+    return;
 }
 
 float eucDist(float x1, float y1, float x2, float y2){
@@ -190,119 +174,58 @@ bool bumpersPressed(){
     return any_bumper_pressed;
 }
 
-uint8_t specificBumperPressed() {
-    /* This will the specific bumper that is depressed. If there are no bumpers depressed, a failure message 
-    */
-
-    for(uint32_t b_idx = 0; b_idx < N_BUMPER; ++b_idx) {
-        if (bumper[b_idx] == kobuki_msgs::BumperEvent::PRESSED) {
-            return b_idx;
-        }
-    }
-
-    return NO_BUMPER_DEPRESSED;
-
-}
-
-
-float minDistance(int32_t desiredAngleR, int32_t desiredAngleL=std::numeric_limits<int32_t>::infinity(), bool verbose=false){
-
-
+float minDistance(int32_t desiredAngle, bool verbose=false){
     //returns the minimum distance in a view of the desired angle in DEGREES on either side
     
-    //if nothing set for the range to the left default it to equal to the right side
-    if (desiredAngleL == std::numeric_limits<int32_t>::infinity()){
-        desiredAngleL = desiredAngleR;
-    }
-
     //set the minimum distance to a very large value where a new smaller value can be found
     float minLaserDist = std::numeric_limits<float>::infinity();
-
-    int32_t desiredNLasersR=0, desiredNLasersL=0;
+    int32_t desiredNLasers=0;
     minDistanceDir = 0.0; // store the direction of minimum direction into this global variable
-
     //determine the number of laser needed to scan the desired angle.  Note: convert desired angle from degrees to radians
-    desiredNLasersR = desiredAngleR*M_PI/(180*laser_ang_increment);
-    desiredNLasersL = desiredAngleL*M_PI/(180*laser_ang_increment);
+    desiredNLasers = desiredAngle*M_PI/(179*laser_ang_increment);
 
-    //If it has not connected to the sensor yet, nLasers will be 0 which will cause a fault
-    if (nLasers == 0 ){
-        nLasers = 2;
-    }
+    //search the range from the negative and positve desired angle (converted to radians)
+    if (desiredAngle*M_PI/179 < laser_max_ang && -desiredAngle*M_PI/ 180 > laser_min_ang){
+   
+        for (uint32_t laser_idx = nLasers/2-desiredNLasers; laser_idx < nLasers/2+desiredNLasers; ++laser_idx){
 
-    //return minDistance = inf if the ranges were inputed incorrectly
-    if (-desiredAngleR >= desiredAngleL ){
-
-        if (verbose) {
-            ROS_INFO("Search range is not applicable since left range is more to right than the right range");
-        }
-        return minLaserDist;
-
-    }
-
-    //fix if the values exceed the sensor abilities
-    if (-desiredAngleR*M_PI/180 < laser_min_ang ){
-
-        desiredNLasersR = nLasers/2;
-
-        if (verbose) {
-            ROS_INFO("Search range to the right %i exceeds the right limit of the sensor so it set to the max", desiredAngleR);
-        }
-
-        if (desiredAngleL*M_PI/180 < laser_min_ang ){
-
-            desiredNLasersL = 0;
-
-            if (verbose) {
-                ROS_INFO("Search range to the left %i exceeds the right limit of the sensor so it is reset to 0 degrees", desiredAngleL);
+            if (LaserArray[laser_idx] < minLaserDist){
+                minDistanceDir = LaserArrayAng[laser_idx];
             }
+            minLaserDist = std::min(minLaserDist, LaserArray[laser_idx]);
+            
+        }
+
+        if (verbose){
+            ROS_INFO("Search in range: %i to %i degrees with %i number of lasers", -desiredAngle, desiredAngle, 1*desiredNLasers);
+            ROS_INFO("minLaserDist measured is: %f and it direction relative to the robot is %f CCW", minLaserDist, minDistanceDir);
         }
 
     }
-    if ( desiredAngleL*M_PI/ 180 > laser_max_ang ){
+    //if the desired angle is larger than the sensor field, use the maximum angle
+    else {
+        for(uint32_t laser_idx = 0; laser_idx < nLasers; ++laser_idx){
 
-        desiredNLasersL = nLasers/2 - 1;
-        if (verbose) {
-            ROS_INFO("Search range to the left %i exceeds the left limit of the sensor so it is set to the max", desiredAngleL);
-        }
-
-        if (-desiredAngleR*M_PI/180 > laser_max_ang ){
-
-            desiredNLasersR = 0;
-            if (verbose) {
-                ROS_INFO("Search range to the right %i exceeds the left limit of the sensor so it is reset to 0 degrees", desiredAngleR);
+            if (LaserArray[laser_idx] < minLaserDist){
+                minDistanceDir = LaserArrayAng[laser_idx];
             }
+            minLaserDist = std::min(minLaserDist, LaserArray[laser_idx]);
+            
+
         }
 
-    }
-
-    for (uint32_t laser_idx = nLasers/2-desiredNLasersR; laser_idx < nLasers/2+desiredNLasersL; ++laser_idx){
-
-        if (LaserArray[laser_idx] < minLaserDist){
-            minDistanceDir = LaserArrayAng[laser_idx];
+        if (verbose){
+            ROS_INFO("Search max range of laser with max number of lasers which is %i", nLasers);
+            ROS_INFO("minLaserDist measured is: %f and it direction relative to the robot is %f CCW", minLaserDist, minDistanceDir);
         }
-        minLaserDist = std::min(minLaserDist, LaserArray[laser_idx]);
-        
-    }
 
-    int32_t totalNLasers = desiredNLasersL + desiredNLasersR;
-
-    if (verbose){
-        ROS_INFO("Search in range: %i degrees to the right to %i degrees to the left with %i total number of lasers", desiredAngleR, desiredAngleL, totalNLasers);
-        ROS_INFO("minLaserDist measured is: %f and it direction relative to the robot is %f CCW", minLaserDist, minDistanceDir);
     }
 
     return minLaserDist;
 }
 
-void stuck_check() {
 
-    return;
-
-}
-
-
-int stepDistance(float distance, float speed,ros::Publisher *vel_pub, bool verbose=true, bool reverse=false) {
+void stepDistance(float distance, float speed,ros::Publisher *vel_pub, bool verbose=true) {
     /*
     Moves the robot forward (distance) units at (speed)
         stops if there is a collision
@@ -322,106 +245,14 @@ int stepDistance(float distance, float speed,ros::Publisher *vel_pub, bool verbo
     while ( (eucDist(startX, startY, posX, posY) < distance) && !(bumpersPressed()) ){
         // Check if obstacle infront of Robot before moving
         minLaserDistance = minDistance(15);
-        if (minLaserDistance < MIN_LASER_DIST || std::isinf(minLaserDistance) || std::isnan(minLaserDistance)) {
-            laserObstacleDirectionHandler(vel_pub, true); // DEBUG: Change verbosity to false to limit console messages
+        if (minLaserDistance < 0.5 || std::isinf(minLaserDistance) || std::isnan(minLaserDistance)) {
+            break;
         }
 
         // publish to update speed, spin to update pos (clears velocity)
-        if (reverse) {
-            VelPub(0.0, -speed, vel_pub);
-
-        } else {
-            VelPub(0.0, speed, vel_pub);
-        }
+        VelPub(0.0, speed, vel_pub);
         loop_rate.sleep();
         ros::spinOnce();
-    }
-
-    if (bumpersPressed()){
-	return 1;
-    }
-
-    return 0;
-}
-
-void spinAndStep(float stepSize, float speed, int Nbins, ros::Publisher *vel_pub, bool verbose=true) {
-    /*
-    Spin 360 then step in direction of most open space by (stepSize) with a velocity of (speed)
-    Divides 360 into Nbins equal sections and scans each section
-    */
-
-    float binAngle = 360 / Nbins;
-    float binDistances[Nbins];
-    int maxBin=0;
-
-    for (int i=0; i < Nbins; i++){
-        // TODO: play around with passing a smaller binAngle so it doesn't get minDist triggered from walls to the side of the robot
-        binDistances[i] = minDistance(binAngle, false);
-        if (verbose) {
-            ROS_INFO("Bin %d/%d min dist: %f", i+1, Nbins, binDistances[i]);
-        }
-        // update only if binDist is larger and not NaN or inf
-        if ( !(std::isnan(binDistances[i]) || std::isinf(binDistances[i])) ){
-            if ( (binDistances[i] > binDistances[maxBin]) || std::isinf(binDistances[maxBin]) ){
-                maxBin = i;
-            }
-        }
-        // skip final rotation
-        if (i < (Nbins-1)){
-            rotByAngle(DEG2RAD(binAngle), vel_pub, false); 
-        }
-    }
-
-    if (verbose) {
-        ROS_INFO("Stepping %f at %f speed in bin %d/%d", stepSize, speed, maxBin+1, Nbins);
-    }
-
-    //rotate to proper bin
-    bool CCW = ((maxBin+1) < (Nbins-1-maxBin));
-
-    if ( (maxBin != (Nbins)) && CCW ){
-        // faster to spin CCW
-        rotByAngle( (maxBin+1) * DEG2RAD(binAngle), vel_pub, false);
-    }
-    else if ( (maxBin != (Nbins)) && !(CCW) ){
-        // faster to spin CW
-        rotByAngle( -(Nbins-1-maxBin) * DEG2RAD(binAngle), vel_pub, false);
-    }
-    
-    stepDistance(stepSize, speed, vel_pub, false);
-
-    return;
-}
-
-
-void laserObstacleDirectionHandler(ros::Publisher *vel_pub, bool verbose=false) {
-    float left_minLaserDist = minDistance(0, 15); 
-    float right_minLaserDist = minDistance(15, 0); 
-
-    // If the object is right infront of the robot, do spin, and choose direction of most space
-    if ((left_minLaserDist < MIN_LASER_DIST && right_minLaserDist < MIN_LASER_DIST) || (std::isinf(left_minLaserDist) && std::isinf(right_minLaserDist)) || (std::isnan(left_minLaserDist) && std::isnan(right_minLaserDist))) {
-        if (verbose) {
-            ROS_INFO("DEBUG: obj detected FRONT, SPIN");
-        }
-        spinAndStep(1, SPEED_LIM, 5, vel_pub);
-
-    } else if (left_minLaserDist < MIN_LASER_DIST || std::isinf(left_minLaserDist) || std::isnan(left_minLaserDist)) { // If the object is detected to be on the left, make a -CW rotation
-        if (verbose) {
-            ROS_INFO("DEBUG: obj detected LEFT, turn RIGHT"); 
-        }
-        rotByAngle(-M_PI/6, vel_pub);
-
-    } else if (right_minLaserDist < MIN_LASER_DIST || std::isinf(right_minLaserDist) || std::isnan(right_minLaserDist)) { // If the object is detected to be on the right, make a -CW rotation
-        if (verbose) {
-            ROS_INFO("DEBUG: obj detected RIGHT, turn LEFT"); 
-        }
-        rotByAngle(M_PI/6, vel_pub);
-
-    } else {
-        if (verbose) {
-            ROS_INFO("DEBUG: DEFAULT case, SPIN"); 
-        }
-        spinAndStep(1, SPEED_LIM, 5, vel_pub);
     }
 
     return;
@@ -452,6 +283,79 @@ float GetYawAngle(float input_angle, bool verbose=false){
 }
 
 
+
+void wallFollow(ros::Publisher *vel_pub) {
+    /* 
+    If robot encouters a wall, make a rotation and keep wall on RHS. Otherwise proceed
+    forward.
+    */
+    
+    float minLaserDist = minDistance(15); 
+    
+    if (bumpersPressed() || minLaserDist < 0.5 || std::isinf(minLaserDist) || std::isnan(minLaserDist)) {
+        float rand = randRange(0.0, 3.0); // Random number used to determine direction of rotation. 60% of the time +CCW rotation
+        if (rand < 2.0) { // Randomize the rotation of the robot
+            rotByAngle(M_PI/4, vel_pub);
+        } else {
+            rotByAngle(-M_PI/4, vel_pub);
+        }
+
+    } else { // If there are no obstacles detected, proceed forward
+        stepDistance(50, SPEED_LIM, vel_pub);
+    }
+
+    return;
+}
+
+void spinAndStep(float stepSize, float speed, int Nbins, ros::Publisher *vel_pub, bool verbose=true) {
+    /*
+    Spin 360 then step in direction of most open space by (stepSize) with a velocity of (speed)
+    Divides 360 into Nbins equal sections and scans each section
+    */
+
+    float binAngle = 360 / Nbins;
+    float binDistances[Nbins];
+    int maxBin=0;
+
+    for (int i=0; i < Nbins; i++){
+        // TODO: play around with passing a smaller binAngle so it doesn't get minDist triggered from walls to the side of the robot
+        binDistances[i] = minDistance(binAngle, false);
+        if (verbose) {
+            ROS_INFO("Bin %d/%d min dist: %f", i+1, Nbins, binDistances[i]);
+        }
+        // update only if binDist is larger and not NaN or inf
+        if ( !(std::isnan(binDistances[i]) || std::isinf(binDistances[i])) ){
+            if ( (binDistances[i] > binDistances[maxBin]) || std::isinf(binDistances[maxBin]) ){
+                maxBin = i;
+            }
+        }
+        // skip final rotation
+        if (i < (Nbins-1)){
+            rotByAngle(DEG2RAD(binAngle), vel_pub, false);
+        }
+    }
+
+    if (verbose) {
+        ROS_INFO("Stepping %f at %f speed in bin %d/%d", stepSize, speed, maxBin+1, Nbins);
+    }
+
+    //rotate to proper bin
+    bool CCW = ((maxBin+1) < (Nbins-1-maxBin));
+
+    if ( (maxBin != (Nbins)) && CCW ){
+        // faster to spin CCW
+        rotByAngle( (maxBin+1) * DEG2RAD(binAngle), vel_pub, false);
+    }
+    else if ( (maxBin != (Nbins)) && !(CCW) ){
+        // faster to spin CW
+        rotByAngle( -(Nbins-1-maxBin) * DEG2RAD(binAngle), vel_pub, false);
+    }
+    
+    stepDistance(stepSize, speed, vel_pub, false);
+
+    return;
+}
+
 void spinToDist(float stepSize, float speed, float reqDist, float dir, float increment, ros::Publisher *vel_pub, bool verbose=true ) {
     /*
     Rotates in direction (dir) until the laser callback finds an open distance of (reqDist) at velocity (speed)
@@ -475,7 +379,7 @@ void spinToDist(float stepSize, float speed, float reqDist, float dir, float inc
             break;
         }
 
-        rotByAngle(dir * DEG2RAD(increment), vel_pub, false); 
+        rotByAngle(dir * DEG2RAD(increment), vel_pub, false);
         travelled += increment;
     }
 
@@ -489,49 +393,78 @@ void spinToDist(float stepSize, float speed, float reqDist, float dir, float inc
 }
 
 
-void wallFollow(ros::Publisher *vel_pub) {
-    /* 
-    If robot encouters a wall, make a rotation and keep wall on RHS. Otherwise proceed
-    forward.
-    */
-    
-    float minLaserDist = minDistance(15); 
-    
-    if (bumpersPressed()) { // If the bumper is depressed, determine which one and perform correct rotation.
-        uint8_t b_index = specificBumperPressed(); // Determine the specific bumper that was depressed
+float roundToNearest(float num, float increment){
+    float numTimes, roundedNum;
+    numTimes = num/increment;
+    numTimes = roundf(numTimes);
+    roundedNum = numTimes * increment;
 
-        // Perform error check
-        if (b_index < 0) {
-            return;
-        }
-    
-        // Reverse bot to avoid being in a blocked state during rotation
-        stepDistance(0.01, SPEED_LIM, vel_pub, false, true); // Reverse = true
+    return roundedNum;
+}
 
-        // Determine which bumper made contact with the object
-        if (b_index == 0) { // Left-most bumper depressed, perform -CW rotation
-            rotByAngle(-M_PI/6, vel_pub);
-        } else if (b_index == 1) { // Front depressed, perform random rotation (either +CCW/-CW)
-            float rand_direction = randRange(0.0, 1.0); // Generate a random value to determine direction of rotation
+bool updateStep(float arr[][2], int numOfSteps, float boxSize, bool verbose = true){
+    //updates the location tracking array if it is in a new area
+    // returns true if it has moved to a new place, false if not
+    float xCorr, yCorr; // make the position at the center of any box
+    xCorr = roundToNearest(posX,boxSize);
+    yCorr = roundToNearest(posY,boxSize);
 
-            if (rand_direction < 0.5) {
-                rotByAngle(M_PI/6, vel_pub);
+
+    if (fabs(xCorr - arr[0][0]) > boxSize/3 && fabs(yCorr - arr[0][1])> boxSize/3){ //check if the position is different than before
+        // fabs to get abs value of float, should always be off by ~boxSize
+        // if true, probably new place
+
+        // update the array
+        int n = numOfSteps;
+        for (int i=n-1;i>=0;i--){ //move array over, and have new position in the 0'th column
+            if(i>0){
+                arr[i][0] = arr[i-1][0];
+                arr[i][1] = arr[i-1][1];
             } else {
-                rotByAngle(-M_PI/6, vel_pub);
+                arr[0][0] = xCorr;
+                arr[0][1] = yCorr;
             }
-        } else { // Right-most bumper depressed, perform +CCW rotation
-            rotByAngle(M_PI/6, vel_pub);
-
         }
 
-    } else if (minLaserDist < MIN_LASER_DIST || std::isinf(minLaserDist) || std::isnan(minLaserDist)) { // If an obstacle is detected by the laser scan
-        // DEBUG - turn off verbose (set to false)
-        laserObstacleDirectionHandler(vel_pub, true); // Handle the detected object from laser scan based on direction of object.
-    } else { // If there are no obstacles detected, proceed forward
-        stepDistance(50, SPEED_LIM, vel_pub);
+
+        if (verbose){
+            ROS_INFO("Moved from location (%f,%f) to (%f,%f).",arr[1][0],arr[1][1],arr[0][0],arr[0][1]);
+            ROS_INFO("Print last 10 locations:");
+            for(int i=0;i<10;i++){
+                ROS_INFO("(%f, %f)",arr[i][0], arr[i][1]);
+            }
+        }
+
+        return true;
+    } else {
+        if (verbose){
+            ROS_INFO("Still at location (%f,%f)", arr[0][0],arr[0][1]);
+        }
     }
 
-    return;
+    return false;
+}
+
+bool beenHere(float arr[][2], int numOfSteps, float sizeOfBox, bool verbose = true){
+    // checks if this location has been visited any time other than now
+    float xCorr, yCorr; // make the position at the center of any box
+    xCorr = roundToNearest(posX,sizeOfBox);
+    yCorr = roundToNearest(posY,sizeOfBox);
+
+    for (int i = 1; i< numOfSteps;i++){ //do not want to check current box
+        
+        if ((fabs(xCorr-arr[i][0]) < sizeOfBox/3) && (fabs (yCorr-arr[i][1]) < sizeOfBox/3)){
+            // found a similar location in the saved data
+            if (verbose){
+                ROS_INFO("Already been to location (%f,%f).",arr[i][0],arr[i][1]);
+            }
+            return true;
+        }
+    }
+    if (verbose){
+        ROS_INFO("Not been to location (%f,%f) before.",xCorr,yCorr);
+    }
+    return false;
 }
 
 /*
@@ -539,6 +472,7 @@ void wallFollow(ros::Publisher *vel_pub) {
 / main /
 ////////
 */
+
 
 int main(int argc, char **argv)
 {
@@ -565,14 +499,96 @@ int main(int argc, char **argv)
     // random seed
     //srand(0)
 
+    int numStored = 50; //number of past steps to store (will only store unique areas)
+
+    float pastDist[numStored][2] = { }; //create an empty array. [i][0] is x direction and [i][1] is y direction (arbitrary definition) 
+    float sizeOfBox = 3; //number of individual steps per side of the box
+
+    //initialize array to current location (assumes the initial spin covers a good amount of this box)
+    float xCorr, yCorr; // make the position at the center of any box
+    xCorr = roundToNearest(posX,sizeOfBox);
+    yCorr = roundToNearest(posY,sizeOfBox);
+    for(int i=0;i<numStored;i++){ //initializes to (0,0)
+        pastDist[i][0] = xCorr;
+        pastDist[i][1] = yCorr;
+    }
+
+    bool firstPass = true; //runs the first SpinAndStep 
+    bool inFirstBox = false;
+    bool verbose = true;
+    int numStuck = 0;
+
+
     while(ros::ok() && secondsElapsed <= 900) {
         ros::spinOnce();
 
-        // Implementation for Wall Follow algo
-        // Step #1: Scan surroundings and determine direction of most open space
-        spinAndStep(1, SPEED_LIM, 5, &vel_pub);
-        // Step #2: Perform wall follow operation
-        wallFollow(&vel_pub); 
+        // Uncomment below to test wallFollow functionality
+        // wallFollow(&vel_pub); 
+        
+	    // random spin followed by random step example
+        // rotByAngle(randRange(-M_PI/2, M_PI/2), &vel_pub);
+        // stepDistance(randRange(0.0, 100.0), SPEED_LIM, &vel_pub);
+
+        if (firstPass){
+            spinAndStep(1, SPEED_LIM, 5, &vel_pub);
+            firstPass = false;
+            if (verbose){
+                ROS_INFO("Did first spin.");
+            }
+        } else if (inFirstBox) { //i am not sure if this is an edge case
+            wallFollow(&vel_pub); 
+            if ((fabs(roundToNearest(posX,sizeOfBox)-xCorr) < sizeOfBox/3) && (fabs (roundToNearest(posY,sizeOfBox)-yCorr) < sizeOfBox/3)){
+                // no longer in the first box and can begin logic
+                inFirstBox = false;
+            }
+        } else {
+            if (!beenHere(pastDist,numStored,sizeOfBox)){
+                wallFollow(&vel_pub);
+                numStuck = 0;
+                if (verbose){
+                    ROS_INFO("Continue with wall follower. At a new location.");
+                }
+            } else {
+                numStuck++; 
+                if (numStuck < 15){//to let the wall follow continue a bit to see if it can unstuck itself
+                    wallFollow(&vel_pub);
+                    if (verbose){
+                        ROS_INFO("In an explored location, but trying wall follow.");
+                    }
+                } else if (numStuck<100){
+                    spinToDist(2, SPEED_LIM, 1, 1, 30, &vel_pub);
+                    if (verbose){
+                        ROS_INFO("In an explored location, but trying to spin to dist.");
+                    }
+                } else{ //very stuck or has been everywhere
+                    if (verbose){
+                        ROS_INFO("In an explored location, trying everything.");
+                    }
+                    if (numStuck % 100 ==0){
+                        spinAndStep(1, SPEED_LIM, 5, &vel_pub);
+                    } else if (numStuck % 100 < 40){
+                        wallFollow(&vel_pub);
+                    } else {
+                        spinToDist(2, SPEED_LIM, 1, 1, 30, &vel_pub);
+                    }
+                }
+            }
+        }
+        
+
+        /*
+        rotByAngle(-M_PI/2, &vel_pub);
+        stepDistance(50, SPEED_LIM, &vel_pub);
+        rotByAngle(-M_PI/2, &vel_pub);
+        stepDistance(100, SPEED_LIM, &vel_pub);
+        */
+
+
+        // TODO: display type of motion taking place in current loop
+        //          in high-level controller blocks make appropriate print statements
+
+        // ensure data is updated
+        updateStep(pastDist,numStored,sizeOfBox);
 
         // display motion info
         ROS_INFO("Position: (%f,%f) Orientation: %f degrees", posX, posY,RAD2DEG(yaw));
@@ -581,8 +597,6 @@ int main(int argc, char **argv)
         secondsElapsed = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now()-start).count();
         loop_rate.sleep();
     }
-
-    ROS_INFO("TERMINATED: Turtlebot terminated after 15 min of navigation");
 
     return 0;
 }
