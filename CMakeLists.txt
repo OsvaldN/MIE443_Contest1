@@ -21,6 +21,6 @@ catkin_package()
 include_directories(include ${OpenCV_INCLUDE_DIRS} ${catkin_INCLUDE_DIRS})
 
 # add the publisher example
-add_executable(contest1 src/contest1.cpp)
+add_executable(contest1 src/contest1.cpp src/utils/callback.cpp src/utils/control.cpp src/utils/laser.cpp src/utils/openSpaceExplore.cpp src/utils/bumper.cpp src/utils/wallFollow.cpp src/utils/gridExplore.cpp)
 target_link_libraries(contest1 ${catkin_LIBRARIES} ${OpenCV_LIB})
 
