@@ -1,4 +1,4 @@
-#include "utils/contest1.h"
+#include "contest1.h"
 
 /*
 ////////
