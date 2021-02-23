@@ -60,6 +60,8 @@ Group: 20
 
     `$xdg-open save_maps/<saved map filename>.pgm`
 
+    **NOTE:** All saved maps will be located in the `./save_maps` directory of the `catkin_ws` workspace.
+
 8. To terminate all the processes in the terminals, perform the following commands:
 
     i) `CTRL+C`
